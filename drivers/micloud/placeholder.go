@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Guyuepp/micloud"
+	"github.com/Guyuepp/xiaomi-drive-go"
 	"github.com/OpenListTeam/OpenList/v4/internal/errs"
 	"github.com/OpenListTeam/OpenList/v4/internal/model"
 	"github.com/OpenListTeam/OpenList/v4/pkg/http_range"
@@ -208,7 +208,7 @@ func (d *MiCloud) dropPlaceholdersIn(folderID string) {
 // placePlaceholder adds a placeholder at dstID with name, failing if the name
 // is taken by a server item or another placeholder.
 func (d *MiCloud) placePlaceholder(ctx context.Context, src *placeholderObj, dstID, name string, keepSource bool) (model.Obj, error) {
-	children, err := d.client.List(ctx, micloud.FolderRef(dstID))
+	children, err := d.client.List(ctx, xiaomidrive.FolderRef(dstID))
 	if err != nil {
 		return nil, mapErr(err)
 	}

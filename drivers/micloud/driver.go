@@ -1,5 +1,5 @@
 // Package micloud is an OpenList driver for Xiaomi Cloud Drive (i.mi.com),
-// built on github.com/Guyuepp/micloud.
+// built on github.com/Guyuepp/xiaomi-drive-go.
 package micloud
 
 import (
@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Guyuepp/micloud"
+	"github.com/Guyuepp/xiaomi-drive-go"
 	"github.com/OpenListTeam/OpenList/v4/internal/driver"
 	"github.com/OpenListTeam/OpenList/v4/internal/errs"
 	"github.com/OpenListTeam/OpenList/v4/internal/model"
@@ -22,7 +22,7 @@ type MiCloud struct {
 	model.Storage
 	Addition
 
-	client *micloud.Client
+	client *xiaomidrive.Client
 
 	// saveMu serialises writes of the addition (tokens, placeholders).
 	saveMu sync.Mutex
@@ -49,19 +49,19 @@ func (d *MiCloud) GetAddition() driver.Additional {
 
 func (d *MiCloud) Init(ctx context.Context) error {
 	if d.RootFolderID == "" {
-		d.RootFolderID = micloud.RootID
+		d.RootFolderID = xiaomidrive.RootID
 	}
 	d.UserID = strings.TrimSpace(d.UserID)
 	d.PassToken = strings.TrimSpace(d.PassToken)
 	if d.UserID == "" || d.PassToken == "" {
 		return errors.New("user_id and pass_token are required; get them with `micloud login qr` and `micloud export`")
 	}
-	d.client = micloud.NewClient(micloud.WithStore(&additionStore{d: d}))
+	d.client = xiaomidrive.NewClient(xiaomidrive.WithStore(&additionStore{d: d}))
 	d.loadPlaceholders()
 	// Always start from a freshly issued serviceToken: it validates the
 	// passToken and avoids relying on a token persisted long ago.
 	if err := d.client.Session().Refresh(ctx); err != nil {
-		if errors.Is(err, micloud.ErrUnauthorized) {
+		if errors.Is(err, xiaomidrive.ErrUnauthorized) {
 			return fmt.Errorf("pass_token rejected, log in again with `micloud login qr`: %w", err)
 		}
 		return err
@@ -159,7 +159,7 @@ func (d *MiCloud) Move(ctx context.Context, srcObj, dstDir model.Obj) (model.Obj
 		return nil, err
 	}
 	src := toFile(srcObj)
-	if err := d.client.Move(ctx, []*micloud.File{src}, dstDir.GetID()); err != nil {
+	if err := d.client.Move(ctx, []*xiaomidrive.File{src}, dstDir.GetID()); err != nil {
 		return nil, mapErr(err)
 	}
 	moved := *src
@@ -170,7 +170,7 @@ func (d *MiCloud) Move(ctx context.Context, srcObj, dstDir model.Obj) (model.Obj
 
 func (d *MiCloud) Rename(ctx context.Context, srcObj model.Obj, newName string) (model.Obj, error) {
 	if p, ok := asPlaceholder(srcObj); ok {
-		if err := micloud.ValidateName(newName); err != nil {
+		if err := xiaomidrive.ValidateName(newName); err != nil {
 			return nil, err
 		}
 		return d.placePlaceholder(ctx, p, p.parentID, newName, false)
@@ -196,7 +196,7 @@ func (d *MiCloud) Copy(ctx context.Context, srcObj, dstDir model.Obj) (model.Obj
 	if p, ok := asPlaceholder(srcObj); ok {
 		return d.placePlaceholder(ctx, p, dstDir.GetID(), p.Name, true)
 	}
-	if err := d.client.Copy(ctx, []*micloud.File{toFile(srcObj)}, dstDir.GetID()); err != nil {
+	if err := d.client.Copy(ctx, []*xiaomidrive.File{toFile(srcObj)}, dstDir.GetID()); err != nil {
 		return nil, mapErr(err)
 	}
 	// The copy gets a new ID the task does not report; returning nil makes
@@ -209,7 +209,7 @@ func (d *MiCloud) Remove(ctx context.Context, obj model.Obj) error {
 		d.removePlaceholder(p)
 		return nil
 	}
-	if err := d.client.Remove(ctx, []*micloud.File{toFile(obj)}); err != nil {
+	if err := d.client.Remove(ctx, []*xiaomidrive.File{toFile(obj)}); err != nil {
 		return mapErr(err)
 	}
 	if obj.IsDir() {
@@ -221,7 +221,7 @@ func (d *MiCloud) Remove(ctx context.Context, obj model.Obj) error {
 func (d *MiCloud) Put(ctx context.Context, dstDir model.Obj, file model.FileStreamer, up driver.UpdateProgress) (model.Obj, error) {
 	size := file.GetSize()
 	if size == 0 {
-		if err := micloud.ValidateName(file.GetName()); err != nil {
+		if err := xiaomidrive.ValidateName(file.GetName()); err != nil {
 			return nil, err
 		}
 		return d.createPlaceholder(dstDir.GetID(), file.GetName(), file.ModTime(), file.CreateTime())
@@ -232,7 +232,7 @@ func (d *MiCloud) Put(ctx context.Context, dstDir model.Obj, file model.FileStre
 	if err != nil {
 		return nil, err
 	}
-	opts := micloud.UploadOptions{
+	opts := xiaomidrive.UploadOptions{
 		Concurrency: d.UploadConcurrency,
 		MimeType:    file.GetMimetype(),
 		ModTime:     file.ModTime(),

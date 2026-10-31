@@ -4,15 +4,15 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/Guyuepp/micloud"
+	"github.com/Guyuepp/xiaomi-drive-go"
 	"github.com/OpenListTeam/OpenList/v4/internal/errs"
 	"github.com/OpenListTeam/OpenList/v4/internal/model"
 	"github.com/OpenListTeam/OpenList/v4/pkg/utils"
 )
 
-// Object adapts *micloud.File to model.Obj.
+// Object adapts *xiaomidrive.File to model.Obj.
 type Object struct {
-	*micloud.File
+	*xiaomidrive.File
 }
 
 func (o *Object) GetHash() utils.HashInfo {
@@ -24,19 +24,19 @@ func (o *Object) GetHash() utils.HashInfo {
 
 var _ model.Obj = (*Object)(nil)
 
-func wrap(f *micloud.File) *Object { return &Object{File: f} }
+func wrap(f *xiaomidrive.File) *Object { return &Object{File: f} }
 
 // toFile recovers the library object behind a model.Obj. Objects built by
 // op (the root, or placeholders) only carry an ID, which is all most calls
 // need.
-func toFile(obj model.Obj) *micloud.File {
+func toFile(obj model.Obj) *xiaomidrive.File {
 	if o, ok := obj.(*Object); ok {
 		return o.File
 	}
 	if obj.IsDir() {
-		return micloud.FolderRef(obj.GetID())
+		return xiaomidrive.FolderRef(obj.GetID())
 	}
-	return &micloud.File{ID: obj.GetID(), Name: obj.GetName(), Size: obj.GetSize(), Type: micloud.TypeOther}
+	return &xiaomidrive.File{ID: obj.GetID(), Name: obj.GetName(), Size: obj.GetSize(), Type: xiaomidrive.TypeOther}
 }
 
 // mapErr translates library errors into the errs values op understands,
@@ -45,13 +45,13 @@ func mapErr(err error) error {
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, micloud.ErrNotFound):
+	case errors.Is(err, xiaomidrive.ErrNotFound):
 		return fmt.Errorf("%w: %v", errs.ObjectNotFound, err)
-	case errors.Is(err, micloud.ErrExist):
+	case errors.Is(err, xiaomidrive.ErrExist):
 		return fmt.Errorf("%w: %v", errs.ObjectAlreadyExists, err)
-	case errors.Is(err, micloud.ErrNotDir):
+	case errors.Is(err, xiaomidrive.ErrNotDir):
 		return fmt.Errorf("%w: %v", errs.NotFolder, err)
-	case errors.Is(err, micloud.ErrIsDir):
+	case errors.Is(err, xiaomidrive.ErrIsDir):
 		return fmt.Errorf("%w: %v", errs.NotFile, err)
 	}
 	return err
@@ -62,11 +62,11 @@ type additionStore struct {
 	d *MiCloud
 }
 
-func (s *additionStore) Load() (*micloud.Credentials, error) {
+func (s *additionStore) Load() (*xiaomidrive.Credentials, error) {
 	s.d.saveMu.Lock()
 	defer s.d.saveMu.Unlock()
 	a := &s.d.Addition
-	return &micloud.Credentials{
+	return &xiaomidrive.Credentials{
 		UserID:            a.UserID,
 		PassToken:         a.PassToken,
 		ServiceToken:      a.ServiceToken,
@@ -75,7 +75,7 @@ func (s *additionStore) Load() (*micloud.Credentials, error) {
 	}, nil
 }
 
-func (s *additionStore) Save(c *micloud.Credentials) error {
+func (s *additionStore) Save(c *xiaomidrive.Credentials) error {
 	a := &s.d.Addition
 	s.d.saveMu.Lock()
 	same := a.ServiceToken == c.ServiceToken && a.PassToken == c.PassToken && a.UserID == c.UserID &&

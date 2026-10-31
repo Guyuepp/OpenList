@@ -192,7 +192,7 @@ require (
 )
 
 require (
-	github.com/Guyuepp/micloud v0.0.0
+	github.com/Guyuepp/xiaomi-drive-go v0.0.0
 	github.com/Max-Sum/base32768 v0.0.0-20230304063302-18e6ce5945fd // indirect
 	github.com/OpenListTeam/gsync v0.1.0 // indirect
 	github.com/abbot/go-http-auth v0.4.0 // indirect
@@ -335,4 +335,4 @@ replace github.com/cronokirby/saferith => github.com/Da3zKi7/saferith v0.33.0-fi
 
 replace github.com/KarpelesLab/reflink => github.com/OpenListTeam/reflink v0.0.0-20260701021214-78760eaeafef
 
-replace github.com/Guyuepp/micloud => ../
+replace github.com/Guyuepp/xiaomi-drive-go => ../
