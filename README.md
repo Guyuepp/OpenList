@@ -1,3 +1,13 @@
+> [!NOTE]
+> **这是 OpenList 的非官方 fork,只多了一个小米云盘(MiCloud)驱动。** 与 OpenList 官方和小米公司均无关。
+>
+> - 下载:[Releases](https://github.com/Guyuepp/OpenList/releases)(`v<官方版本>-micloud.<序号>`,基于对应的官方正式版)
+> - 驱动依赖的库和使用说明:[Guyuepp/xiaomi-drive-go](https://github.com/Guyuepp/xiaomi-drive-go)
+> - 改动:`drivers/micloud/`,以及 WebDAV 对空文件直接返回空内容(`server/webdav/webdav.go`)
+> - 问题请反馈到 [xiaomi-drive-go](https://github.com/Guyuepp/xiaomi-drive-go/issues),不要提交到 OpenList 官方
+>
+> **Unofficial fork of OpenList that adds a Xiaomi Cloud Drive (MiCloud) driver.** Not affiliated with OpenList or Xiaomi. Report issues to [xiaomi-drive-go](https://github.com/Guyuepp/xiaomi-drive-go/issues), not upstream.
+
 <div align="center">
   <img src="https://raw.githubusercontent.com/OpenListTeam/Logo/main/logo.svg" width="128" height="128" alt="logo" />
 
