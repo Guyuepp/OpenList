@@ -1,0 +1,45 @@
+name: MiCloud fork release
+
+# Tags look like v4.2.9-micloud.1: upstream version + fork revision.
+on:
+  push:
+    tags: ["v*-micloud.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27.3"
+      - name: Vet driver
+        run: go vet ./drivers/micloud/ ./server/webdav/
+      - name: Build archives
+        run: bash scripts/release-micloud.sh "$GITHUB_REF_NAME" build/micloud-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          upstream="${GITHUB_REF_NAME%%-micloud*}"
+          lib="$(go list -m -f '{{.Version}}' github.com/Guyuepp/xiaomi-drive-go)"
+          cat > notes.md <<EOF
+          OpenList ${upstream} with the MiCloud (小米云盘) driver, built from this tag.
+
+          - Upstream: [OpenList ${upstream}](https://github.com/OpenListTeam/OpenList/releases/tag/${upstream})
+          - Driver library: [xiaomi-drive-go ${lib}](https://github.com/Guyuepp/xiaomi-drive-go/releases/tag/${lib})
+          - Source for these binaries: this tag (AGPL-3.0, same as upstream)
+
+          Unofficial build, not affiliated with OpenList or Xiaomi. 非官方构建,与 OpenList 和小米公司无关。
+
+          macOS: the binaries are not notarized; run \`xattr -d com.apple.quarantine openlist\` if Gatekeeper blocks them.
+          EOF
+          gh release create "$GITHUB_REF_NAME" build/micloud-release/*.tar.gz build/micloud-release/*.zip \
+            build/micloud-release/sha256sums.txt --title "$GITHUB_REF_NAME" --notes-file notes.md
