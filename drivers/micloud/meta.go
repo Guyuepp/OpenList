@@ -15,6 +15,9 @@ type Addition struct {
 	ServiceToken      string
 	DeviceID          string
 	DeviceFingerprint string
+	// Empty files kept locally (the service cannot store 0-byte files), as
+	// JSON. See placeholder.go.
+	Placeholders string
 }
 
 var config = driver.Config{

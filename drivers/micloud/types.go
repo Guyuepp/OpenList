@@ -3,12 +3,10 @@ package micloud
 import (
 	"errors"
 	"fmt"
-	"sync"
 
 	"github.com/Guyuepp/micloud"
 	"github.com/OpenListTeam/OpenList/v4/internal/errs"
 	"github.com/OpenListTeam/OpenList/v4/internal/model"
-	"github.com/OpenListTeam/OpenList/v4/internal/op"
 	"github.com/OpenListTeam/OpenList/v4/pkg/utils"
 )
 
@@ -61,13 +59,12 @@ func mapErr(err error) error {
 
 // additionStore persists rotating credentials into the storage's Addition.
 type additionStore struct {
-	mu sync.Mutex
-	d  *MiCloud
+	d *MiCloud
 }
 
 func (s *additionStore) Load() (*micloud.Credentials, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.d.saveMu.Lock()
+	defer s.d.saveMu.Unlock()
 	a := &s.d.Addition
 	return &micloud.Credentials{
 		UserID:            a.UserID,
@@ -79,22 +76,24 @@ func (s *additionStore) Load() (*micloud.Credentials, error) {
 }
 
 func (s *additionStore) Save(c *micloud.Credentials) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	a := &s.d.Addition
-	if a.ServiceToken == c.ServiceToken && a.PassToken == c.PassToken && a.UserID == c.UserID &&
-		a.DeviceID == c.DeviceID && a.DeviceFingerprint == c.DeviceFingerprint {
+	s.d.saveMu.Lock()
+	same := a.ServiceToken == c.ServiceToken && a.PassToken == c.PassToken && a.UserID == c.UserID &&
+		a.DeviceID == c.DeviceID && a.DeviceFingerprint == c.DeviceFingerprint
+	s.d.saveMu.Unlock()
+	if same {
 		return nil
 	}
-	if c.UserID != "" {
-		a.UserID = c.UserID
-	}
-	if c.PassToken != "" {
-		a.PassToken = c.PassToken
-	}
-	a.ServiceToken = c.ServiceToken
-	a.DeviceID = c.DeviceID
-	a.DeviceFingerprint = c.DeviceFingerprint
-	op.MustSaveDriverStorage(s.d)
+	s.d.persist(func() {
+		if c.UserID != "" {
+			a.UserID = c.UserID
+		}
+		if c.PassToken != "" {
+			a.PassToken = c.PassToken
+		}
+		a.ServiceToken = c.ServiceToken
+		a.DeviceID = c.DeviceID
+		a.DeviceFingerprint = c.DeviceFingerprint
+	})
 	return nil
 }

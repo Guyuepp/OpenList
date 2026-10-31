@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Guyuepp/micloud"
 	"github.com/OpenListTeam/OpenList/v4/internal/driver"
 	"github.com/OpenListTeam/OpenList/v4/internal/errs"
 	"github.com/OpenListTeam/OpenList/v4/internal/model"
+	"github.com/OpenListTeam/OpenList/v4/internal/op"
 )
 
 type MiCloud struct {
@@ -21,6 +23,20 @@ type MiCloud struct {
 	Addition
 
 	client *micloud.Client
+
+	// saveMu serialises writes of the addition (tokens, placeholders).
+	saveMu sync.Mutex
+	// phMu guards ph: parent folder ID -> lower-case name -> empty file.
+	phMu sync.Mutex
+	ph   map[string]map[string]placeholder
+}
+
+// persist applies a change to the addition and saves the storage record.
+func (d *MiCloud) persist(change func()) {
+	d.saveMu.Lock()
+	defer d.saveMu.Unlock()
+	change()
+	op.MustSaveDriverStorage(d)
 }
 
 func (d *MiCloud) Config() driver.Config {
@@ -41,6 +57,7 @@ func (d *MiCloud) Init(ctx context.Context) error {
 		return errors.New("user_id and pass_token are required; get them with `micloud login qr` and `micloud export`")
 	}
 	d.client = micloud.NewClient(micloud.WithStore(&additionStore{d: d}))
+	d.loadPlaceholders()
 	// Always start from a freshly issued serviceToken: it validates the
 	// passToken and avoids relying on a token persisted long ago.
 	if err := d.client.Session().Refresh(ctx); err != nil {
@@ -70,7 +87,7 @@ func (d *MiCloud) List(ctx context.Context, dir model.Obj, args model.ListArgs) 
 	for i, f := range files {
 		objs[i] = wrap(f)
 	}
-	return objs, nil
+	return d.mergePlaceholders(dir.GetID(), objs), nil
 }
 
 // linkMargin is subtracted from the URL lifetime so OpenList never hands out
@@ -78,6 +95,12 @@ func (d *MiCloud) List(ctx context.Context, dir model.Obj, args model.ListArgs) 
 const linkMargin = 10 * time.Minute
 
 func (d *MiCloud) Link(ctx context.Context, file model.Obj, args model.LinkArgs) (*model.Link, error) {
+	if _, ok := asPlaceholder(file); ok {
+		if args.Redirect {
+			return nil, errPlaceholderRedirect
+		}
+		return placeholderLink(), nil
+	}
 	l, err := d.client.Link(ctx, file.GetID())
 	if err != nil {
 		return nil, mapErr(err)
@@ -101,8 +124,9 @@ func (d *MiCloud) MakeDir(ctx context.Context, parentDir model.Obj, dirName stri
 	return wrap(f), nil
 }
 
-// conflict reports whether dir already holds an item named name. The service
-// compares names case-insensitively.
+// conflict reports whether dir already holds an item named name, on the
+// server or as a local empty file. The service compares names
+// case-insensitively.
 func (d *MiCloud) conflict(ctx context.Context, dir model.Obj, name string) error {
 	children, err := d.client.List(ctx, toFile(dir))
 	if err != nil {
@@ -113,10 +137,22 @@ func (d *MiCloud) conflict(ctx context.Context, dir model.Obj, name string) erro
 			return fmt.Errorf("%w: %q", errs.ObjectAlreadyExists, c.Name)
 		}
 	}
+	return d.placeholderConflict(dir.GetID(), name)
+}
+
+func (d *MiCloud) placeholderConflict(parentID, name string) error {
+	d.phMu.Lock()
+	defer d.phMu.Unlock()
+	if d.phExistsLocked(parentID, name) {
+		return fmt.Errorf("%w: %q (empty file)", errs.ObjectAlreadyExists, name)
+	}
 	return nil
 }
 
 func (d *MiCloud) Move(ctx context.Context, srcObj, dstDir model.Obj) (model.Obj, error) {
+	if p, ok := asPlaceholder(srcObj); ok {
+		return d.placePlaceholder(ctx, p, dstDir.GetID(), p.Name, false)
+	}
 	// MOVE silently renames on a clash ("name(1).ext"), which would desync
 	// OpenList's view; refuse instead, like a file system would.
 	if err := d.conflict(ctx, dstDir, srcObj.GetName()); err != nil {
@@ -133,7 +169,20 @@ func (d *MiCloud) Move(ctx context.Context, srcObj, dstDir model.Obj) (model.Obj
 }
 
 func (d *MiCloud) Rename(ctx context.Context, srcObj model.Obj, newName string) (model.Obj, error) {
+	if p, ok := asPlaceholder(srcObj); ok {
+		if err := micloud.ValidateName(newName); err != nil {
+			return nil, err
+		}
+		return d.placePlaceholder(ctx, p, p.parentID, newName, false)
+	}
 	src := toFile(srcObj)
+	// The service does not know about local empty files and would happily
+	// take the name, after which the empty file would vanish from listings.
+	if src.ParentID != "" && !strings.EqualFold(src.Name, newName) {
+		if err := d.placeholderConflict(src.ParentID, newName); err != nil {
+			return nil, err
+		}
+	}
 	if err := d.client.Rename(ctx, src.ID, newName); err != nil {
 		return nil, mapErr(err)
 	}
@@ -144,6 +193,9 @@ func (d *MiCloud) Rename(ctx context.Context, srcObj model.Obj, newName string) 
 }
 
 func (d *MiCloud) Copy(ctx context.Context, srcObj, dstDir model.Obj) (model.Obj, error) {
+	if p, ok := asPlaceholder(srcObj); ok {
+		return d.placePlaceholder(ctx, p, dstDir.GetID(), p.Name, true)
+	}
 	if err := d.client.Copy(ctx, []*micloud.File{toFile(srcObj)}, dstDir.GetID()); err != nil {
 		return nil, mapErr(err)
 	}
@@ -153,13 +205,26 @@ func (d *MiCloud) Copy(ctx context.Context, srcObj, dstDir model.Obj) (model.Obj
 }
 
 func (d *MiCloud) Remove(ctx context.Context, obj model.Obj) error {
-	return mapErr(d.client.Remove(ctx, []*micloud.File{toFile(obj)}))
+	if p, ok := asPlaceholder(obj); ok {
+		d.removePlaceholder(p)
+		return nil
+	}
+	if err := d.client.Remove(ctx, []*micloud.File{toFile(obj)}); err != nil {
+		return mapErr(err)
+	}
+	if obj.IsDir() {
+		d.dropPlaceholdersIn(obj.GetID())
+	}
+	return nil
 }
 
 func (d *MiCloud) Put(ctx context.Context, dstDir model.Obj, file model.FileStreamer, up driver.UpdateProgress) (model.Obj, error) {
 	size := file.GetSize()
 	if size == 0 {
-		return nil, fmt.Errorf("%w: %s", micloud.ErrEmptyFile, file.GetName())
+		if err := micloud.ValidateName(file.GetName()); err != nil {
+			return nil, err
+		}
+		return d.createPlaceholder(dstDir.GetID(), file.GetName(), file.ModTime(), file.CreateTime())
 	}
 	// Hashes of the whole file and of every 4 MiB block must be sent before
 	// any data, so the stream is cached first (reported as 0-50%).
@@ -183,6 +248,9 @@ func (d *MiCloud) Put(ctx context.Context, dstDir model.Obj, file model.FileStre
 	if err != nil {
 		return nil, mapErr(err)
 	}
+	// op.Put removes a same-name empty file first; this also covers a name
+	// differing only in case.
+	d.dropPlaceholder(dstDir.GetID(), file.GetName())
 	return wrap(f), nil
 }
 
