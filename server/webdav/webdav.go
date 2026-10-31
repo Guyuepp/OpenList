@@ -332,6 +332,12 @@ func (h *Handler) handleGetHeadPost(w http.ResponseWriter, r *http.Request) (sta
 	}
 	// Let ServeContent determine the Content-Type header.
 	storage, _ := fs.GetStorage(reqPath, &fs.GetStoragesArgs{})
+	// An empty file has no content to redirect to or proxy, and some drivers
+	// cannot produce a link for it; answer directly.
+	if fi.GetSize() == 0 {
+		http.ServeContent(w, r, fi.GetName(), fi.ModTime(), strings.NewReader(""))
+		return 0, nil
+	}
 	if storage.GetStorage().Webdav302() {
 		link, _, err := fs.Link(ctx, reqPath, model.LinkArgs{IP: utils.ClientIP(r), Header: r.Header, Redirect: true})
 		if err != nil {
