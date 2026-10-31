@@ -1,0 +1,100 @@
+package micloud
+
+import (
+	"errors"
+	"fmt"
+	"sync"
+
+	"github.com/Guyuepp/micloud"
+	"github.com/OpenListTeam/OpenList/v4/internal/errs"
+	"github.com/OpenListTeam/OpenList/v4/internal/model"
+	"github.com/OpenListTeam/OpenList/v4/internal/op"
+	"github.com/OpenListTeam/OpenList/v4/pkg/utils"
+)
+
+// Object adapts *micloud.File to model.Obj.
+type Object struct {
+	*micloud.File
+}
+
+func (o *Object) GetHash() utils.HashInfo {
+	if o.SHA1 == "" {
+		return utils.HashInfo{}
+	}
+	return utils.NewHashInfo(utils.SHA1, o.SHA1)
+}
+
+var _ model.Obj = (*Object)(nil)
+
+func wrap(f *micloud.File) *Object { return &Object{File: f} }
+
+// toFile recovers the library object behind a model.Obj. Objects built by
+// op (the root, or placeholders) only carry an ID, which is all most calls
+// need.
+func toFile(obj model.Obj) *micloud.File {
+	if o, ok := obj.(*Object); ok {
+		return o.File
+	}
+	if obj.IsDir() {
+		return micloud.FolderRef(obj.GetID())
+	}
+	return &micloud.File{ID: obj.GetID(), Name: obj.GetName(), Size: obj.GetSize(), Type: micloud.TypeOther}
+}
+
+// mapErr translates library errors into the errs values op understands,
+// keeping the original message.
+func mapErr(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, micloud.ErrNotFound):
+		return fmt.Errorf("%w: %v", errs.ObjectNotFound, err)
+	case errors.Is(err, micloud.ErrExist):
+		return fmt.Errorf("%w: %v", errs.ObjectAlreadyExists, err)
+	case errors.Is(err, micloud.ErrNotDir):
+		return fmt.Errorf("%w: %v", errs.NotFolder, err)
+	case errors.Is(err, micloud.ErrIsDir):
+		return fmt.Errorf("%w: %v", errs.NotFile, err)
+	}
+	return err
+}
+
+// additionStore persists rotating credentials into the storage's Addition.
+type additionStore struct {
+	mu sync.Mutex
+	d  *MiCloud
+}
+
+func (s *additionStore) Load() (*micloud.Credentials, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a := &s.d.Addition
+	return &micloud.Credentials{
+		UserID:            a.UserID,
+		PassToken:         a.PassToken,
+		ServiceToken:      a.ServiceToken,
+		DeviceID:          a.DeviceID,
+		DeviceFingerprint: a.DeviceFingerprint,
+	}, nil
+}
+
+func (s *additionStore) Save(c *micloud.Credentials) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a := &s.d.Addition
+	if a.ServiceToken == c.ServiceToken && a.PassToken == c.PassToken && a.UserID == c.UserID &&
+		a.DeviceID == c.DeviceID && a.DeviceFingerprint == c.DeviceFingerprint {
+		return nil
+	}
+	if c.UserID != "" {
+		a.UserID = c.UserID
+	}
+	if c.PassToken != "" {
+		a.PassToken = c.PassToken
+	}
+	a.ServiceToken = c.ServiceToken
+	a.DeviceID = c.DeviceID
+	a.DeviceFingerprint = c.DeviceFingerprint
+	op.MustSaveDriverStorage(s.d)
+	return nil
+}
