@@ -332,10 +332,7 @@ func (h *Handler) handleGetHeadPost(w http.ResponseWriter, r *http.Request) (sta
 	}
 	// Let ServeContent determine the Content-Type header.
 	storage, _ := fs.GetStorage(reqPath, &fs.GetStoragesArgs{})
-	// An empty file has no content to redirect to or proxy, and some drivers
-	// cannot produce a link for it; answer directly.
-	if fi.GetSize() == 0 {
-		http.ServeContent(w, r, fi.GetName(), fi.ModTime(), strings.NewReader(""))
+	if serveKnownEmpty(w, r, fi) {
 		return 0, nil
 	}
 	if storage.GetStorage().Webdav302() {
@@ -373,6 +370,26 @@ func (h *Handler) handleGetHeadPost(w http.ResponseWriter, r *http.Request) (sta
 		return http.StatusInternalServerError, fmt.Errorf("webdav proxy error: %+v", err)
 	}
 	return 0, nil
+}
+
+// A zero size can mean "unknown" (for example url_tree), so only objects
+// explicitly declaring empty content can bypass links, redirects and proxies.
+func serveKnownEmpty(w http.ResponseWriter, r *http.Request, file model.Obj) bool {
+	if file.IsDir() || file.GetSize() != 0 {
+		return false
+	}
+	for obj := file; obj != nil; {
+		if empty, ok := obj.(model.ObjKnownEmpty); ok && empty.IsKnownEmpty() {
+			http.ServeContent(w, r, file.GetName(), file.ModTime(), strings.NewReader(""))
+			return true
+		}
+		wrapped, ok := obj.(model.ObjUnwrap)
+		if !ok {
+			break
+		}
+		obj = wrapped.Unwrap()
+	}
+	return false
 }
 
 func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request) (status int, err error) {

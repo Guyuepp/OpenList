@@ -19,6 +19,12 @@ type ObjUnwrap interface {
 	Unwrap() Obj
 }
 
+// ObjKnownEmpty marks content known to be empty, rather than an object whose
+// size metadata is unknown. Only explicit local empty files should opt in.
+type ObjKnownEmpty interface {
+	IsKnownEmpty() bool
+}
+
 type ObjDisplayName interface {
 	GetDisplayName() string
 }

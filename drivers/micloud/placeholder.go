@@ -39,6 +39,8 @@ type placeholderObj struct {
 	parentID string
 }
 
+func (*placeholderObj) IsKnownEmpty() bool { return true }
+
 func (d *MiCloud) newPlaceholderObj(parentID string, p placeholder) *placeholderObj {
 	return &placeholderObj{
 		Object: model.Object{
